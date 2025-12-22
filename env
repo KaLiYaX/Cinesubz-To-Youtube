@@ -1,0 +1,10 @@
+# Telegram Bot
+TELEGRAM_TOKEN=8360871393:AAFu1qxN7yZhjwjN_P_J-Kmja125w3_mtxU
+ADMIN_USERNAME=kalindu_gaweshana
+
+# CineSubz API
+API_KEY=1b899858fd185941
+
+# YouTube API
+YOUTUBE_CLIENT_ID=244362295116-1nt3ffb6tq9eek0f96jcog5016199h52.apps.googleusercontent.com
+YOUTUBE_CLIENT_SECRET=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
