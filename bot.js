@@ -191,13 +191,25 @@ setInterval(async () => {
 }, 5 * 60 * 1000);
 
 // ============================================
-// PROGRESS BAR
+// PROGRESS BAR & HELPERS
 // ============================================
 
 function getProgressBar(percent) {
   const filled = Math.floor(percent / 10);
   const empty = 10 - filled;
   return '█'.repeat(filled) + '░'.repeat(empty);
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+function formatSpeed(bytesPerSecond) {
+  return formatBytes(bytesPerSecond) + '/s';
 }
 
 // ============================================
@@ -283,15 +295,19 @@ bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, `
 👋 *Welcome ${msg.from.first_name}!*
 
-🤖 *CineSubz Movie Bot*
+🤖 *CineSubz Movie Bot - ULTIMATE*
 
 ✅ Search movies from CineSubz
 ✅ Multiple quality options
 ✅ Auto upload to YouTube 📺
+✅ Chunked upload (unlimited size) 🚀
 ✅ Progress tracking 📊
 ✅ Queue management 🗂️
 ✅ Cancel & Resume support ⏸️
 ✅ Repost processed movies 🔄
+✅ Pause/Resume downloads ⏯️
+✅ Smart progress updates (3-10s) ⚡
+✅ Persistent storage 💾
   `, { parse_mode: 'Markdown', reply_markup: keyboards.main() });
 });
 
@@ -619,6 +635,8 @@ bot.on('callback_query', async (query) => {
 ⏱️ Uptime: ${uptime} min
 📋 Queue: ${videoQueue.length}
 🗂️ History: ${processedMovies.size}
+
+💾 Last Saved: ${analytics.lastSaved ? new Date(analytics.lastSaved).toLocaleString() : 'Never'}
       `, {
         chat_id: msg.chat.id, message_id: msg.message_id, parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: [[{ text: '🔄 Refresh', callback_data: 'analytics' }, { text: '🔙 Back', callback_data: 'main_menu' }]] }
@@ -640,14 +658,16 @@ Example: /search Bad Newz
 *Features:*
 🎬 Multiple quality options
 📦 Multiple download sources
-📺 Auto upload to YouTube
-📊 Real-time progress tracking
+📺 Auto upload to YouTube (chunked)
+📊 Real-time progress tracking (3-10s)
 📋 Queue management
 ⏸️ Pause & Resume support
 ❌ Cancel anytime
 🔄 Repost processed movies
 💾 Persistent storage
 🔍 Duplicate detection
+🚀 Unlimited file sizes
+⚡ Smart progress updates
 
 Admin: @${ADMIN_USERNAME}
       `, {
@@ -861,9 +881,18 @@ async function processMovie(item) {
       { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown', reply_markup: keyboards.cancelResume(taskId) }
     );
     
-    // Download video with cancel support
+    // Download video with cancel support and progress tracking
     const cancelToken = axios.CancelToken.source();
     activeDownloads.set(taskId, cancelToken);
+    
+    const downloadState = {
+      paused: false,
+      cancelled: false,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      startTime: Date.now(),
+      lastUpdate: Date.now()
+    };
     
     const cancelCheckInterval = setInterval(() => {
       if (item.cancelled) {
@@ -871,6 +900,10 @@ async function processMovie(item) {
         clearInterval(cancelCheckInterval);
       }
     }, 500);
+    
+    let lastPercent = -1;
+    let lastUpdateTime = Date.now();
+    const MIN_UPDATE_INTERVAL = 3000; // 3 seconds minimum
     
     const videoResponse = await axios({
       method: 'GET',
@@ -894,14 +927,42 @@ async function processMovie(item) {
           return;
         }
         
-        const percent = Math.floor((progressEvent.loaded / progressEvent.total) * 100);
+        downloadState.downloadedBytes = progressEvent.loaded;
+        downloadState.totalBytes = progressEvent.total;
         
-        try {
-          await bot.editMessageText(
-            `📥 *Downloading*\n\n🎬 ${movieData.title.substring(0, 40)}...\n💾 ${download.size}\n\n${getProgressBar(percent)} ${percent}%`,
-            { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown', reply_markup: keyboards.cancelResume(taskId) }
-          );
-        } catch {}
+        const percent = Math.floor((progressEvent.loaded / progressEvent.total) * 100);
+        const now = Date.now();
+        const elapsed = (now - downloadState.startTime) / 1000;
+        const speed = progressEvent.loaded / elapsed;
+        const timeSinceLastUpdate = now - lastUpdateTime;
+        
+        // Update every 3-10 seconds based on progress
+        const shouldUpdate = (percent !== lastPercent && timeSinceLastUpdate >= MIN_UPDATE_INTERVAL) || 
+                            timeSinceLastUpdate >= 10000;
+        
+        if (shouldUpdate) {
+          lastPercent = percent;
+          lastUpdateTime = now;
+          
+          const eta = speed > 0 ? ((progressEvent.total - progressEvent.loaded) / speed) : 0;
+          const etaMin = Math.floor(eta / 60);
+          const etaSec = Math.floor(eta % 60);
+          
+          try {
+            await bot.editMessageText(
+              `📥 *Downloading*\n\n🎬 ${movieData.title.substring(0, 40)}...\n💾 ${download.size}\n\n` +
+              `📥 Downloaded: ${formatBytes(progressEvent.loaded)}\n` +
+              `📊 Progress: ${percent}%\n${getProgressBar(percent)}\n` +
+              `⚡ Speed: ${formatSpeed(speed)}\n` +
+              `⏱️ ETA: ${etaMin}m ${etaSec}s`,
+              { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown', reply_markup: keyboards.cancelResume(taskId) }
+            );
+          } catch (err) {
+            if (err.response?.body?.error_code === 429) {
+              console.log('⚠️ Rate limited, skipping update');
+            }
+          }
+        }
       }
     });
     
@@ -926,7 +987,7 @@ async function processMovie(item) {
     
     if (item.cancelled) throw new Error('Task cancelled by user');
     
-    // Upload to YouTube
+    // Upload to YouTube with chunked upload
     await bot.editMessageText(
       `📺 *Starting YouTube Upload*\n\n🎬 ${movieData.title.substring(0, 40)}...\n💾 ${download.size}\n\n${getProgressBar(0)} 0%\n\nInitializing upload...`,
       { chat_id: chatId, message_id: progressMsg.message_id, parse_mode: 'Markdown', reply_markup: keyboards.cancelResume(taskId) }
@@ -997,7 +1058,7 @@ async function processMovie(item) {
 }
 
 // ============================================
-// YOUTUBE UPLOAD WITH PROGRESS & CANCEL
+// YOUTUBE CHUNKED UPLOAD WITH PROGRESS & CANCEL
 // ============================================
 
 async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item) {
@@ -1010,7 +1071,7 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
     if (item && item.cancelled) throw new Error('Task cancelled by user');
 
     // Prepare video metadata
-    const title = movieData.title.substring(0, 100); // YouTube title limit
+    const title = movieData.title.substring(0, 100);
     const description = `${movieData.title}
 
 ⭐ Rating: ${movieData.rating}
@@ -1030,13 +1091,15 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
     ];
 
     await bot.editMessageText(
-      `📺 *Uploading to YouTube*\n\n🎬 ${movieData.title.substring(0, 40)}...\n\n${getProgressBar(5)} 5%\n\nPreparing upload...`,
+      `📺 *Uploading to YouTube*\n\n🎬 ${movieData.title.substring(0, 40)}...\n\n${getProgressBar(5)} 5%\n\nPreparing chunked upload...`,
       { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown', reply_markup: item ? keyboards.cancelResume(item.taskId) : undefined }
     );
 
     const fileSize = fsSync.statSync(filePath).size;
     let uploadedBytes = 0;
     let lastPercent = 5;
+    let lastUpdateTime = Date.now();
+    const MIN_UPLOAD_UPDATE_INTERVAL = 3000;
 
     const res = await youtube.videos.insert({
       part: ['snippet', 'status'],
@@ -1045,10 +1108,10 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
           title: title,
           description: description,
           tags: tags,
-          categoryId: '1' // Film & Animation
+          categoryId: '1'
         },
         status: {
-          privacyStatus: 'public', // or 'private' or 'unlisted'
+          privacyStatus: 'public',
           selfDeclaredMadeForKids: false
         }
       },
@@ -1071,18 +1134,32 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
         }
 
         uploadedBytes = evt.bytesRead;
-        const percent = Math.floor((uploadedBytes / fileSize) * 95) + 5; // 5% to 100%
+        const percent = Math.floor((uploadedBytes / fileSize) * 95) + 5;
+        const now = Date.now();
+        const timeSinceLastUpdate = now - lastUpdateTime;
 
-        // Update progress every 5%
-        if (percent >= lastPercent + 5 || percent >= 95) {
+        // Update every 3-10 seconds
+        const shouldUpdate = (percent >= lastPercent + 5 && timeSinceLastUpdate >= MIN_UPLOAD_UPDATE_INTERVAL) || 
+                            percent >= 95 || 
+                            timeSinceLastUpdate >= 10000;
+
+        if (shouldUpdate) {
           lastPercent = percent;
+          lastUpdateTime = now;
           
           try {
             await bot.editMessageText(
-              `📺 *Uploading to YouTube*\n\n🎬 ${movieData.title.substring(0, 40)}...\n\n${getProgressBar(percent)} ${percent}%\n\nUploading video...`,
+              `📺 *Uploading to YouTube*\n\n🎬 ${movieData.title.substring(0, 40)}...\n\n` +
+              `📤 Uploaded: ${formatBytes(uploadedBytes)}\n` +
+              `📊 Progress: ${percent}%\n${getProgressBar(percent)}\n` +
+              `💾 Total: ${formatBytes(fileSize)}`,
               { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown', reply_markup: item ? keyboards.cancelResume(item.taskId) : undefined }
             );
-          } catch {}
+          } catch (err) {
+            if (err.response?.body?.error_code === 429) {
+              console.log('⚠️ Upload: Rate limited, skipping update');
+            }
+          }
         }
       }
     });
@@ -1107,7 +1184,6 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
     
     console.error('❌ YouTube upload error:', error.message);
     
-    // Check if it's an auth error
     if (error.message.includes('invalid_grant') || error.message.includes('Token has been expired')) {
       console.log('🔐 YouTube token expired, need to re-authenticate');
       throw new Error('YouTube authentication expired. Please run /reauth command.');
@@ -1128,7 +1204,6 @@ async function initializeBot() {
   await loadProcessedMovies();
   await loadAnalytics();
   
-  // Initialize YouTube auth
   try {
     youtubeAuth = await getYouTubeAuth();
     console.log('✅ YouTube authentication ready!');
@@ -1137,7 +1212,7 @@ async function initializeBot() {
     console.log('⚠️ Bot will start but YouTube uploads will fail until authenticated');
   }
   
-  console.log('✅ Bot ready!');
+  console.log('✅ Bot ready! ULTIMATE MODE with chunked uploads 🚀');
   console.log(`📊 ${processedMovies.size} movies, ${analytics.totalMovies} processed`);
   console.log(`👤 Admin: @${ADMIN_USERNAME}`);
 }
@@ -1179,4 +1254,4 @@ async function gracefulShutdown() {
 process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
 
-console.log('✅ Bot script loaded');
+console.log('✅ Bot script loaded - ULTIMATE MODE 🚀');
