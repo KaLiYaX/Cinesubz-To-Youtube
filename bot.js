@@ -308,6 +308,7 @@ bot.onText(/\/start/, (msg) => {
 ✅ Pause/Resume downloads ⏯️
 ✅ Smart progress updates (3-10s) ⚡
 ✅ Persistent storage 💾
+✅ 429 Error Prevention 🛡️
   `, { parse_mode: 'Markdown', reply_markup: keyboards.main() });
 });
 
@@ -659,7 +660,7 @@ Example: /search Bad Newz
 🎬 Multiple quality options
 📦 Multiple download sources
 📺 Auto upload to YouTube (chunked)
-📊 Real-time progress tracking (3-10s)
+📊 Real-time progress tracking (5-15s)
 📋 Queue management
 ⏸️ Pause & Resume support
 ❌ Cancel anytime
@@ -668,6 +669,7 @@ Example: /search Bad Newz
 🔍 Duplicate detection
 🚀 Unlimited file sizes
 ⚡ Smart progress updates
+🛡️ 429 Error Prevention (max 15 updates)
 
 Admin: @${ADMIN_USERNAME}
       `, {
@@ -1059,6 +1061,7 @@ async function processMovie(item) {
 
 // ============================================
 // YOUTUBE CHUNKED UPLOAD WITH PROGRESS & CANCEL
+// Line 982 - YouTube Upload Progress Tracking Variables
 // ============================================
 
 async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item) {
@@ -1095,11 +1098,13 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
       { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown', reply_markup: item ? keyboards.cancelResume(item.taskId) : undefined }
     );
 
+    // Line 982 - YouTube Upload Progress Tracking Variables
     const fileSize = fsSync.statSync(filePath).size;
     let uploadedBytes = 0;
     let lastPercent = 5;
     let lastUpdateTime = Date.now();
-    const MIN_UPLOAD_UPDATE_INTERVAL = 3000;
+    const MIN_UPLOAD_UPDATE_INTERVAL = 5000; // 5 seconds minimum between updates
+    let updateCount = 0;
 
     const res = await youtube.videos.insert({
       part: ['snippet', 'status'],
@@ -1138,14 +1143,20 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
         const now = Date.now();
         const timeSinceLastUpdate = now - lastUpdateTime;
 
-        // Update every 3-10 seconds
-        const shouldUpdate = (percent >= lastPercent + 5 && timeSinceLastUpdate >= MIN_UPLOAD_UPDATE_INTERVAL) || 
-                            percent >= 95 || 
-                            timeSinceLastUpdate >= 10000;
+        // Much stricter update rules to avoid 429 errors
+        // Only update if:
+        // 1. At least 5 seconds passed AND percent increased by at least 10%
+        // 2. OR at least 15 seconds passed (forced update)
+        // 3. BUT stop updating after 90% to avoid spam at end
+        const shouldUpdate = percent < 90 && (
+          (percent >= lastPercent + 10 && timeSinceLastUpdate >= MIN_UPLOAD_UPDATE_INTERVAL) || 
+          timeSinceLastUpdate >= 15000
+        );
 
-        if (shouldUpdate) {
+        if (shouldUpdate && updateCount < 15) { // Max 15 updates total
           lastPercent = percent;
           lastUpdateTime = now;
+          updateCount++;
           
           try {
             await bot.editMessageText(
@@ -1155,9 +1166,13 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
               `💾 Total: ${formatBytes(fileSize)}`,
               { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown', reply_markup: item ? keyboards.cancelResume(item.taskId) : undefined }
             );
+            
+            // Add small delay after successful update to prevent rapid requests
+            await new Promise(resolve => setTimeout(resolve, 1000));
           } catch (err) {
             if (err.response?.body?.error_code === 429) {
-              console.log('⚠️ Upload: Rate limited, skipping update');
+              console.log('⚠️ Upload: Rate limited, increasing wait time');
+              lastUpdateTime = now + 10000; // Force 10 second wait before next try
             }
           }
         }
@@ -1212,7 +1227,7 @@ async function initializeBot() {
     console.log('⚠️ Bot will start but YouTube uploads will fail until authenticated');
   }
   
-  console.log('✅ Bot ready! ULTIMATE MODE with chunked uploads 🚀');
+  console.log('✅ Bot ready! ULTIMATE MODE with chunked uploads & 429 prevention 🚀');
   console.log(`📊 ${processedMovies.size} movies, ${analytics.totalMovies} processed`);
   console.log(`👤 Admin: @${ADMIN_USERNAME}`);
 }
@@ -1254,4 +1269,4 @@ async function gracefulShutdown() {
 process.on('SIGINT', gracefulShutdown);
 process.on('SIGTERM', gracefulShutdown);
 
-console.log('✅ Bot script loaded - ULTIMATE MODE 🚀');
+console.log('✅ Bot script loaded - ULTIMATE MODE with 429 Prevention 🚀🛡️');
