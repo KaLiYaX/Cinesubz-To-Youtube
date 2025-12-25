@@ -411,12 +411,24 @@ bot.on('callback_query', async (query) => {
           { chat_id: msg.chat.id, message_id: loadingMsg.message_id, parse_mode: 'Markdown' }
         );
         
-        let message = `🎬 *${movieData.title}*\n\n`;
+        let message = `🎬 *${movieData.title.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\        let message = `🎬 *${movieData.title}*\n\n`;
         message += `⭐ Rating: ${movieData.rating}\n`;
         message += `📅 Year: ${movieData.year}\n`;
         message += `⏱️ Duration: ${movieData.duration}\n`;
         message += `🗣️ Language: ${movieData.tag}\n`;
         message += `🎥 ${movieData.directors}\n\n`;
+        message += `📥 *Select Quality:*\n`;')}*\n\n`;
+        message += `⭐ Rating: ${movieData.rating}\n`;
+        message += `📅 Year: ${movieData.year}\n`;
+        message += `⏱️ Duration: ${movieData.duration}\n`;
+        message += `🗣️ Language: ${movieData.tag}\n`;
+        message += `🎥 ${movieData.directors.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\        let message = `🎬 *${movieData.title}*\n\n`;
+        message += `⭐ Rating: ${movieData.rating}\n`;
+        message += `📅 Year: ${movieData.year}\n`;
+        message += `⏱️ Duration: ${movieData.duration}\n`;
+        message += `🗣️ Language: ${movieData.tag}\n`;
+        message += `🎥 ${movieData.directors}\n\n`;
+        message += `📥 *Select Quality:*\n`;')}\n\n`;
         message += `📥 *Select Quality:*\n`;
         
         const qualityButtons = movieData.downloads.map((download, idx) => [{
@@ -474,7 +486,8 @@ bot.on('callback_query', async (query) => {
       const movieData = session.movieData;
       
       bot.sendMessage(msg.chat.id, 
-        `🔄 *Reposting Movie*\n\n🎬 ${movieData.title}\n\nSelect quality to repost:`,
+        `🔄 *Reposting Movie*\n\n🎬 ${movieData.title.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\      bot.sendMessage(msg.chat.id, 
+        `🔄 *Reposting Movie*\n\n🎬 ${movieData.title}\n\nSelect quality to repost:`,')}\n\nSelect quality to repost:`,
         { 
           parse_mode: 'Markdown',
           reply_markup: {
@@ -526,7 +539,10 @@ bot.on('callback_query', async (query) => {
       });
       
       bot.sendMessage(msg.chat.id, 
+        `✅ *Added to Queue*\n\n🎬 ${movieData.title.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\      bot.sendMessage(msg.chat.id, 
         `✅ *Added to Queue*\n\n🎬 ${movieData.title}\n💾 ${downloadData.size}\n📦 Source: ${selectedSource.name.toUpperCase()}`,
+        { parse_mode: 'Markdown', reply_markup: keyboards.main() }
+      );')}\n💾 ${downloadData.size}\n📦 Source: ${selectedSource.name.toUpperCase()}`,
         { parse_mode: 'Markdown', reply_markup: keyboards.main() }
       );
       
@@ -591,7 +607,13 @@ bot.on('callback_query', async (query) => {
       if (item) {
         await bot.editMessageText(
           `🎬 *Queue #${index + 1}*\n\n` +
+          `📝 ${item.movieData.title.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\        await bot.editMessageText(
+          `🎬 *Queue #${index + 1}*\n\n` +
           `📝 ${item.movieData.title}\n` +
+          `💾 Size: ${item.download.size}\n` +
+          `📦 Source: ${item.source || 'N/A'}\n` +
+          `📊 Status: ${item.status}${item.paused ? ' (Paused)' : ''}${item.cancelled ? ' (Cancelled)' : ''}\n` +
+          `⏰ ${new Date(item.addedAt).toLocaleTimeString()}`,')}\n` +
           `💾 Size: ${item.download.size}\n` +
           `📦 Source: ${item.source || 'N/A'}\n` +
           `📊 Status: ${item.status}${item.paused ? ' (Paused)' : ''}${item.cancelled ? ' (Cancelled)' : ''}\n` +
@@ -610,7 +632,7 @@ bot.on('callback_query', async (query) => {
       if (removed.taskId === currentProcessing?.taskId) {
         currentProcessing.cancelled = true;
       }
-      await bot.editMessageText(`✅ *Removed*\n\n${removed.movieData.title}`, {
+      await bot.editMessageText(`✅ *Removed*\n\n${removed.movieData.title.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\      await bot.editMessageText(`✅ *Removed*\n\n${removed.movieData.title}`, {')}`, {
         chat_id: msg.chat.id, message_id: msg.message_id,
         parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🔙 Queue', callback_data: 'view_queue' }]] }
       });
@@ -721,7 +743,11 @@ async function fetchDownloadLinksAndQueue(chatId, session, download, movieData, 
     await new Promise(resolve => setTimeout(resolve, 500));
     
     let optionsMessage = `📥 *Download Options*\n\n`;
+    optionsMessage += `🎬 ${movieData.title.substring(0, 40).replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\    let optionsMessage = `📥 *Download Options*\n\n`;
     optionsMessage += `🎬 ${movieData.title.substring(0, 40)}...\n`;
+    optionsMessage += `💾 ${downloadData.size}\n`;
+    if (isRepost) optionsMessage += `🔄 Reposting\n`;
+    optionsMessage += `\n*Select Download Source:*\n`;')}...\n`;
     optionsMessage += `💾 ${downloadData.size}\n`;
     if (isRepost) optionsMessage += `🔄 Reposting\n`;
     optionsMessage += `\n*Select Download Source:*\n`;
@@ -1075,6 +1101,11 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
 
     // Prepare video metadata
     const title = movieData.title.substring(0, 100);
+    
+    // Clean tags to avoid special characters
+    const cleanTag = movieData.tag.replace(/[^a-zA-Z0-9]/g, '');
+    const cleanYear = movieData.year.replace(/[^0-9]/g, '');
+    
     const description = `${movieData.title}
 
 ⭐ Rating: ${movieData.rating}
@@ -1083,7 +1114,7 @@ async function uploadVideoToYouTube(filePath, movieData, chatId, messageId, item
 🗣️ Language: ${movieData.tag}
 🎥 ${movieData.directors}
 
-#${movieData.tag} #Movie #${movieData.year}`;
+#${cleanTag} #Movie #${cleanYear}`;
 
     const tags = [
       movieData.tag,
